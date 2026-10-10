@@ -19,8 +19,9 @@ function getConfigFile(): string {
 
 export function loadConfig(options?: Partial<NotifyConfig>): NotifyConfig {
   try {
-    if (typeof (process as any).loadEnvFile === 'function') {
-      (process as any).loadEnvFile();
+    const proc = process as unknown as { loadEnvFile?: () => void };
+    if (typeof proc.loadEnvFile === 'function') {
+      proc.loadEnvFile();
     }
   } catch {}
 
