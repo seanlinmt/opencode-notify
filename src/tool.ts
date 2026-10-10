@@ -1,18 +1,24 @@
-import { tool, type ToolDefinition } from '@opencode-ai/plugin';
-import type { JobTracker } from './tracker';
-import type { NotifyConfig } from './types';
+import { type ToolDefinition, tool } from '@opencode-ai/plugin';
 import { sendNtfyNotification } from './notifier';
+import type { JobTracker } from './tracker';
 import { formatDuration } from './tracker';
+import type { NotifyConfig } from './types';
 
 const z = tool.schema;
 
-export function createNotifyTool(tracker: JobTracker, config: NotifyConfig): ToolDefinition {
+export function createNotifyTool(
+  tracker: JobTracker,
+  config: NotifyConfig,
+): ToolDefinition {
   return tool({
     description:
       'Send a push notification over ntfy/Telegram reporting job status and outstanding jobs remaining.',
     args: {
       message: z.string().describe('The notification message body or summary'),
-      title: z.string().optional().describe('Optional custom title for the notification'),
+      title: z
+        .string()
+        .optional()
+        .describe('Optional custom title for the notification'),
       status: z
         .enum(['completed', 'failed', 'in_progress', 'info'])
         .optional()
@@ -39,11 +45,14 @@ export function createNotifyTool(tracker: JobTracker, config: NotifyConfig): Too
       } else {
         lines.push(`Outstanding Jobs Remaining: ${remainingCount}`);
         for (const job of outstanding) {
-          lines.push(`• ${job.title} (${formatDuration(job.durationMs)} elapsed)`);
+          lines.push(
+            `• ${job.title} (${formatDuration(job.durationMs)} elapsed)`,
+          );
         }
       }
 
-      const notifTitle = (args.title as string) || `OpenCode: Job ${status.toUpperCase()}`;
+      const notifTitle =
+        (args.title as string) || `OpenCode: Job ${status.toUpperCase()}`;
       const payload = {
         title: notifTitle,
         message: lines.join('\n'),

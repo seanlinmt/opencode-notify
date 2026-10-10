@@ -1,21 +1,63 @@
-import type { Hooks, Plugin, PluginInput, PluginOptions } from '@opencode-ai/plugin';
 import { appendFileSync } from 'node:fs';
+import type {
+  Hooks,
+  Plugin,
+  PluginInput,
+  PluginOptions,
+} from '@opencode-ai/plugin';
 import { loadConfig } from './config';
 import { sendNtfyNotification } from './notifier';
 import { createNotifyTool } from './tool';
 import { JobTracker } from './tracker';
 import type { NotifyConfig } from './types';
 
+interface EventLike {
+  id?: string;
+  sessionID?: string;
+  type?: string;
+  title?: string;
+  directory?: string;
+  location?: { directory?: string };
+  data?: {
+    id?: string;
+    sessionID?: string;
+    title?: string;
+    directory?: string;
+    error?: { message?: string } | string;
+  };
+  properties?: {
+    id?: string;
+    sessionID?: string;
+    directory?: string;
+    error?: { message?: string } | string;
+    status?: { type?: string; message?: string } | string;
+    info?: {
+      id?: string;
+      sessionID?: string;
+      title?: string;
+      directory?: string;
+    };
+  };
+}
+
+interface PluginSetupContext {
+  directory?: string;
+  options?: Partial<NotifyConfig>;
+  event?: {
+    subscribe?: (opts?: { signal?: AbortSignal }) => AsyncIterable<EventLike>;
+  };
+}
+
 const LOG_FILE = '/tmp/opencode-notify.log';
 
-function logDebug(msg: string, data?: any) {
+function logDebug(msg: string, data?: unknown) {
   const line = `[${new Date().toISOString()}] ${msg} ${data ? JSON.stringify(data) : ''}\n`;
   try {
     appendFileSync(LOG_FILE, line);
   } catch {}
 }
 
-function resolveSessionID(event: any): string | undefined {
+function resolveSessionID(event: EventLike): string | undefined {
   if (!event) return undefined;
   return (
     event.sessionID ??
@@ -29,7 +71,7 @@ function resolveSessionID(event: any): string | undefined {
   );
 }
 
-function resolveDirectory(event: any): string | undefined {
+function resolveDirectory(event: EventLike): string | undefined {
   if (!event) return undefined;
   return (
     event.location?.directory ??
@@ -45,7 +87,7 @@ export function createEventHandler(
   config: NotifyConfig,
   getSessionTitle?: (id: string) => Promise<string | undefined>,
 ) {
-  return async (rawEvent: any) => {
+  return async (rawEvent: EventLike) => {
     if (!rawEvent) return;
     const type = rawEvent.type;
     if (!type) return;
@@ -65,8 +107,15 @@ export function createEventHandler(
     if (!config.enabled) return;
 
     // Track session created or renamed
-    if (type === 'session.created' || type === 'session.updated' || type === 'session.renamed') {
-      const title = rawEvent.data?.title ?? rawEvent.properties?.info?.title ?? rawEvent.title;
+    if (
+      type === 'session.created' ||
+      type === 'session.updated' ||
+      type === 'session.renamed'
+    ) {
+      const title =
+        rawEvent.data?.title ??
+        rawEvent.properties?.info?.title ??
+        rawEvent.title;
       if (sessionID) {
         tracker.registerSession(sessionID, title, directory);
       }
@@ -74,10 +123,17 @@ export function createEventHandler(
     }
 
     // Job execution started
+    const statusVal = rawEvent.properties?.status;
+    const isBusy =
+      statusVal === 'busy' ||
+      (typeof statusVal === 'object' &&
+        statusVal !== null &&
+        statusVal.type === 'busy');
+
     if (
       type === 'session.execution.started' ||
       type === 'session.step.started' ||
-      (type === 'session.status' && (rawEvent.properties?.status === 'busy' || rawEvent.properties?.status?.type === 'busy'))
+      (type === 'session.status' && isBusy)
     ) {
       if (sessionID) {
         tracker.onSessionBusy(sessionID, undefined, directory);
@@ -87,14 +143,22 @@ export function createEventHandler(
     }
 
     // Job execution succeeded / finished
+    const isIdle =
+      statusVal === 'idle' ||
+      (typeof statusVal === 'object' &&
+        statusVal !== null &&
+        statusVal.type === 'idle');
+
     if (
       type === 'session.execution.succeeded' ||
       type === 'session.idle' ||
-      (type === 'session.status' && (rawEvent.properties?.status === 'idle' || rawEvent.properties?.status?.type === 'idle'))
+      (type === 'session.status' && isIdle)
     ) {
       if (sessionID) {
         logDebug(`Processing completion for: ${sessionID} on ${type}`);
-        const freshTitle = getSessionTitle ? await getSessionTitle(sessionID) : undefined;
+        const freshTitle = getSessionTitle
+          ? await getSessionTitle(sessionID)
+          : undefined;
         const completion = tracker.onSessionIdle(sessionID, freshTitle);
         if (completion?.shouldNotify && config.notifyOnSuccess) {
           logDebug(`Dispatching completion notification for: ${sessionID}`);
@@ -123,7 +187,10 @@ export function createEventHandler(
         const errorMsg =
           typeof errorData === 'string'
             ? errorData
-            : errorData?.message || (type === 'session.execution.interrupted' ? 'Interrupted' : JSON.stringify(errorData || {}));
+            : errorData?.message ||
+              (type === 'session.execution.interrupted'
+                ? 'Interrupted'
+                : JSON.stringify(errorData || {}));
 
         const completion = tracker.onSessionError(sessionID, errorMsg);
         if (completion?.shouldNotify && config.notifyOnError) {
@@ -157,11 +224,19 @@ export const notifyPlugin: Plugin = async (
 
   const notifyTool = createNotifyTool(tracker, config);
 
-  async function tryResolveSessionTitle(sessionID: string): Promise<string | undefined> {
+  async function tryResolveSessionTitle(
+    sessionID: string,
+  ): Promise<string | undefined> {
     try {
-      if (input.client?.session?.get) {
-        // @ts-ignore
-        const res = await input.client.session.get({ path: { id: sessionID } });
+      const sessionApi = input.client?.session as
+        | {
+            get?: (arg: {
+              path: { id: string };
+            }) => Promise<{ data?: { title?: string } }>;
+          }
+        | undefined;
+      if (sessionApi?.get) {
+        const res = await sessionApi.get({ path: { id: sessionID } });
         if (res?.data?.title) {
           return res.data.title;
         }
@@ -172,14 +247,18 @@ export const notifyPlugin: Plugin = async (
     return undefined;
   }
 
-  const handleEvent = createEventHandler(tracker, config, tryResolveSessionTitle);
+  const handleEvent = createEventHandler(
+    tracker,
+    config,
+    tryResolveSessionTitle,
+  );
 
   const hooks: Hooks = {
     tool: {
       notify_job_status: notifyTool,
     },
     event: async ({ event }) => {
-      await handleEvent(event);
+      await handleEvent(event as unknown as EventLike);
     },
   };
 
@@ -189,7 +268,7 @@ export const notifyPlugin: Plugin = async (
 export const OpenCodeNotifyPlugin = {
   id: 'opencode-notify',
   server: notifyPlugin,
-  setup: async (ctx: any) => {
+  setup: async (ctx: PluginSetupContext) => {
     logDebug(`Plugin OpenCodeNotifyPlugin setup invoked (v2)`, {
       hasSubscribe: typeof ctx?.event?.subscribe === 'function',
       directory: ctx?.directory,
@@ -200,10 +279,13 @@ export const OpenCodeNotifyPlugin = {
     const handleEvent = createEventHandler(tracker, config);
 
     if (ctx?.event?.subscribe) {
+      const subscribe = ctx.event.subscribe;
       const controller = new AbortController();
       void (async () => {
         try {
-          for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          for await (const event of subscribe({
+            signal: controller.signal,
+          })) {
             await handleEvent(event);
           }
         } catch (e: unknown) {

@@ -7,7 +7,7 @@ describe('OpenCode Notify Plugin Integration', () => {
 
     // Mock fetch to intercept ntfy call
     const originalFetch = globalThis.fetch;
-    // @ts-ignore
+    // @ts-expect-error
     globalThis.fetch = mock(async (url: string, init?: any) => {
       sentPayload = {
         url,
@@ -85,7 +85,7 @@ describe('OpenCode Notify Plugin Integration', () => {
     let sentPayload: any = null;
 
     const originalFetch = globalThis.fetch;
-    // @ts-ignore
+    // @ts-expect-error
     globalThis.fetch = mock(async (url: string, init?: any) => {
       sentPayload = {
         url,

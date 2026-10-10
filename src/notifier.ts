@@ -1,5 +1,5 @@
-import type { NotificationPayload, NotifyConfig } from './types';
 import https from 'node:https';
+import type { NotificationPayload, NotifyConfig } from './types';
 
 export async function sendNtfyNotification(
   config: NotifyConfig,
@@ -13,18 +13,20 @@ export async function sendNtfyNotification(
 
   const headers: Record<string, string> = {
     'Content-Type': 'text/plain; charset=utf-8',
-    'Title': payload.title,
+    Title: payload.title,
   };
 
   if (payload.priority !== undefined) {
-    headers['Priority'] = String(payload.priority);
+    headers.Priority = String(payload.priority);
   }
 
   if (payload.tags && payload.tags.length > 0) {
-    headers['Tags'] = payload.tags.join(',');
+    headers.Tags = payload.tags.join(',');
   }
 
-  const normalizedMessage = payload.message.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+  const normalizedMessage = payload.message
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n');
 
   try {
     // Attempt modern fetch with Bun/Node support
@@ -33,7 +35,6 @@ export async function sendNtfyNotification(
       body: normalizedMessage,
       headers,
       // Bun tls option:
-      // @ts-ignore
       tls: { rejectUnauthorized: false },
     });
 
@@ -63,7 +64,11 @@ export async function sendNtfyNotification(
             },
           },
           (res) => {
-            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            if (
+              res.statusCode &&
+              res.statusCode >= 200 &&
+              res.statusCode < 300
+            ) {
               resolve({ success: true });
             } else {
               resolve({ success: false, error: `HTTP ${res.statusCode}` });
@@ -79,7 +84,10 @@ export async function sendNtfyNotification(
         req.end();
       });
     } catch (fallbackErr: unknown) {
-      const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      const fallbackMsg =
+        fallbackErr instanceof Error
+          ? fallbackErr.message
+          : String(fallbackErr);
       const originalMsg = err instanceof Error ? err.message : String(err);
       return { success: false, error: fallbackMsg || originalMsg };
     }

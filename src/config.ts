@@ -46,7 +46,8 @@ export function loadConfig(options?: Partial<NotifyConfig>): NotifyConfig {
   if (topic) {
     envConfig.topic = topic;
   }
-  const enabledRaw = process.env.OPENCODE_NTFY_ENABLED ?? process.env.NTFY_ENABLED;
+  const enabledRaw =
+    process.env.OPENCODE_NTFY_ENABLED ?? process.env.NTFY_ENABLED;
   if (enabledRaw !== undefined) {
     envConfig.enabled = enabledRaw === 'true' || enabledRaw === '1';
   }

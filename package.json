@@ -14,7 +14,9 @@
   },
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target node --format esm --external @opencode-ai/plugin --external @opencode-ai/sdk --external zod && tsc --emitDeclarationOnly",
-    "test": "bun test"
+    "test": "bun test",
+    "lint": "biome check .",
+    "format": "biome format --write ."
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.35",

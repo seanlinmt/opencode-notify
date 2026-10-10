@@ -1,4 +1,10 @@
-import { existsSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OutstandingJob, SessionInfo } from './types';
@@ -37,7 +43,11 @@ function tryAcquireDebounceLock(sessionID: string, windowMs = 5000): boolean {
     return true;
   } catch (err: unknown) {
     const error = err as { code?: string; message?: string } | null;
-    if (error && (error.code === 'EEXIST' || error.message?.includes('file already exists'))) {
+    if (
+      error &&
+      (error.code === 'EEXIST' ||
+        error.message?.includes('file already exists'))
+    ) {
       return false;
     }
     // If filesystem locking is inaccessible (e.g. sandbox permissions), fall back to in-memory lock
@@ -74,7 +84,11 @@ export class JobTracker {
     this.defaultDirectory = dir;
   }
 
-  public registerSession(sessionID: string, title?: string, directory?: string): SessionInfo {
+  public registerSession(
+    sessionID: string,
+    title?: string,
+    directory?: string,
+  ): SessionInfo {
     let session = this.sessions.get(sessionID);
     const now = Date.now();
     if (!session) {
@@ -98,7 +112,11 @@ export class JobTracker {
     return session;
   }
 
-  public onSessionBusy(sessionID: string, title?: string, directory?: string): SessionInfo {
+  public onSessionBusy(
+    sessionID: string,
+    title?: string,
+    directory?: string,
+  ): SessionInfo {
     const session = this.registerSession(sessionID, title, directory);
     const now = Date.now();
     session.status = 'busy';
@@ -107,7 +125,10 @@ export class JobTracker {
     return session;
   }
 
-  public onSessionError(sessionID: string, errorDetails?: string): {
+  public onSessionError(
+    sessionID: string,
+    _errorDetails?: string,
+  ): {
     shouldNotify: boolean;
     session: SessionInfo;
     durationMs: number;
@@ -142,7 +163,10 @@ export class JobTracker {
     };
   }
 
-  public onSessionIdle(sessionID: string, title?: string): {
+  public onSessionIdle(
+    sessionID: string,
+    title?: string,
+  ): {
     shouldNotify: boolean;
     session: SessionInfo;
     durationMs: number;
@@ -216,7 +240,8 @@ export class JobTracker {
     ];
 
     if (session.directory) {
-      const dirName = session.directory.split('/').filter(Boolean).pop() || session.directory;
+      const dirName =
+        session.directory.split('/').filter(Boolean).pop() || session.directory;
       lines.push(`Project: ${dirName}`);
     }
 
@@ -231,7 +256,9 @@ export class JobTracker {
     } else {
       lines.push(`Outstanding Jobs Remaining: ${remainingCount}`);
       for (const job of outstanding) {
-        lines.push(`• ${job.title} (${formatDuration(job.durationMs)} elapsed)`);
+        lines.push(
+          `• ${job.title} (${formatDuration(job.durationMs)} elapsed)`,
+        );
       }
     }
 
