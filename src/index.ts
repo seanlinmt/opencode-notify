@@ -7,6 +7,7 @@ import type {
 } from '@opencode-ai/plugin';
 import { loadConfig } from './config';
 import { sendNtfyNotification } from './notifier';
+import { resolveSessionTitleFromDb } from './session-resolver';
 import { createNotifyTool } from './tool';
 import { JobTracker } from './tracker';
 import type { NotifyConfig } from './types';
@@ -82,6 +83,35 @@ function resolveDirectory(event: EventLike): string | undefined {
   );
 }
 
+function resolveEventTitle(event: EventLike): string | undefined {
+  if (!event) return undefined;
+  const candidate =
+    event.title ??
+    event.data?.title ??
+    (event.data as { name?: string; description?: string } | undefined)?.name ??
+    (event.data as { name?: string; description?: string } | undefined)
+      ?.description ??
+    event.properties?.info?.title ??
+    (
+      event.properties?.info as
+        | { name?: string; description?: string }
+        | undefined
+    )?.name ??
+    (
+      event.properties?.info as
+        | { name?: string; description?: string }
+        | undefined
+    )?.description;
+
+  if (candidate && typeof candidate === 'string' && candidate.trim()) {
+    const trimmed = candidate.trim();
+    if (!trimmed.startsWith('ses_')) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
 export function createEventHandler(
   tracker: JobTracker,
   config: NotifyConfig,
@@ -136,8 +166,15 @@ export function createEventHandler(
       (type === 'session.status' && isBusy)
     ) {
       if (sessionID) {
-        tracker.onSessionBusy(sessionID, undefined, directory);
-        logDebug(`Marked busy for: ${sessionID}`);
+        let title = resolveEventTitle(rawEvent);
+        if (!title && getSessionTitle) {
+          title = await getSessionTitle(sessionID);
+        }
+        if (!title) {
+          title = resolveSessionTitleFromDb(sessionID);
+        }
+        tracker.onSessionBusy(sessionID, title, directory);
+        logDebug(`Marked busy for: ${sessionID}`, { title });
       }
       return;
     }
@@ -156,11 +193,28 @@ export function createEventHandler(
     ) {
       if (sessionID) {
         logDebug(`Processing completion for: ${sessionID} on ${type}`);
-        const freshTitle = getSessionTitle
-          ? await getSessionTitle(sessionID)
-          : undefined;
+        const freshTitle =
+          (getSessionTitle ? await getSessionTitle(sessionID) : undefined) ||
+          resolveSessionTitleFromDb(sessionID);
         const completion = tracker.onSessionIdle(sessionID, freshTitle);
         if (completion?.shouldNotify && config.notifyOnSuccess) {
+          for (const job of completion.outstanding) {
+            if (
+              !job.title ||
+              job.title.startsWith('Session ses_') ||
+              job.title.startsWith('ses_') ||
+              job.title.startsWith('Job (ses_')
+            ) {
+              const fresh =
+                (getSessionTitle
+                  ? await getSessionTitle(job.sessionID)
+                  : undefined) || resolveSessionTitleFromDb(job.sessionID);
+              if (fresh) {
+                job.title = fresh;
+                tracker.updateSessionTitle(job.sessionID, fresh);
+              }
+            }
+          }
           logDebug(`Dispatching completion notification for: ${sessionID}`);
           const notif = tracker.formatNotification(
             completion.session,
@@ -194,6 +248,23 @@ export function createEventHandler(
 
         const completion = tracker.onSessionError(sessionID, errorMsg);
         if (completion?.shouldNotify && config.notifyOnError) {
+          for (const job of completion.outstanding) {
+            if (
+              !job.title ||
+              job.title.startsWith('Session ses_') ||
+              job.title.startsWith('ses_') ||
+              job.title.startsWith('Job (ses_')
+            ) {
+              const fresh =
+                (getSessionTitle
+                  ? await getSessionTitle(job.sessionID)
+                  : undefined) || resolveSessionTitleFromDb(job.sessionID);
+              if (fresh) {
+                job.title = fresh;
+                tracker.updateSessionTitle(job.sessionID, fresh);
+              }
+            }
+          }
           const notif = tracker.formatNotification(
             completion.session,
             completion.durationMs,
@@ -230,21 +301,31 @@ export const notifyPlugin: Plugin = async (
     try {
       const sessionApi = input.client?.session as
         | {
-            get?: (arg: {
-              path: { id: string };
-            }) => Promise<{ data?: { title?: string } }>;
+            get?: (arg: { path: { id: string } }) => Promise<{
+              data?: {
+                title?: string;
+                slug?: string;
+                name?: string;
+                description?: string;
+              };
+            }>;
           }
         | undefined;
       if (sessionApi?.get) {
         const res = await sessionApi.get({ path: { id: sessionID } });
-        if (res?.data?.title) {
-          return res.data.title;
+        const d = res?.data;
+        const candidate = d?.title || d?.name || d?.description || d?.slug;
+        if (candidate && typeof candidate === 'string' && candidate.trim()) {
+          const trimmed = candidate.trim();
+          if (!trimmed.startsWith('ses_')) {
+            return trimmed;
+          }
         }
       }
     } catch {
       // Ignore API errors, use tracked title
     }
-    return undefined;
+    return resolveSessionTitleFromDb(sessionID);
   }
 
   const handleEvent = createEventHandler(
@@ -276,7 +357,11 @@ export const OpenCodeNotifyPlugin = {
 
     const config = loadConfig(ctx?.options);
     const tracker = new JobTracker(ctx?.directory || '');
-    const handleEvent = createEventHandler(tracker, config);
+    const handleEvent = createEventHandler(
+      tracker,
+      config,
+      async (id: string) => resolveSessionTitleFromDb(id),
+    );
 
     if (ctx?.event?.subscribe) {
       const subscribe = ctx.event.subscribe;

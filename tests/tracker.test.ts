@@ -99,4 +99,25 @@ describe('JobTracker', () => {
     const second = tracker.onSessionIdle('session-dup');
     expect(second).toBeNull();
   });
+
+  it('updates session titles and uses human-readable names instead of raw IDs', () => {
+    const tracker = new JobTracker('/projects/ecommerce');
+    tracker.registerSession('ses_abc123');
+    tracker.onSessionBusy('ses_abc123');
+    tracker.updateSessionTitle('ses_abc123', 'Optimize Checkout Flow');
+
+    const result = tracker.onSessionIdle('ses_abc123');
+    expect(result).not.toBeNull();
+    expect(result!.session.title).toBe('Optimize Checkout Flow');
+
+    const formatted = tracker.formatNotification(
+      result!.session,
+      result!.durationMs,
+      [],
+      false,
+    );
+    expect(formatted.title).toContain('Optimize Checkout Flow');
+    expect(formatted.message).toContain('Job: Optimize Checkout Flow');
+    expect(formatted.message).not.toContain('Session ses_abc123');
+  });
 });

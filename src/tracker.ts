@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveSessionTitleFromDb } from './session-resolver';
 import type { OutstandingJob, SessionInfo } from './types';
 
 export function formatDuration(ms: number): string {
@@ -91,25 +92,59 @@ export class JobTracker {
   ): SessionInfo {
     let session = this.sessions.get(sessionID);
     const now = Date.now();
+    const effectiveDir = directory || this.defaultDirectory;
+
+    let effectiveTitle =
+      title && !title.startsWith('ses_') ? title.trim() : undefined;
+    if (!effectiveTitle) {
+      effectiveTitle = resolveSessionTitleFromDb(sessionID);
+    }
+    if (!effectiveTitle && effectiveDir) {
+      const parts = effectiveDir.replace(/[\\/]+$/, '').split(/[\\/]/);
+      const last = parts[parts.length - 1];
+      if (last) {
+        effectiveTitle = `${last} job`;
+      }
+    }
+    if (!effectiveTitle) {
+      effectiveTitle = `Job (${sessionID.slice(0, 8)})`;
+    }
+
     if (!session) {
       session = {
         sessionID,
-        title: title || `Session ${sessionID.slice(0, 8)}`,
-        directory: directory || this.defaultDirectory,
+        title: effectiveTitle,
+        directory: effectiveDir,
         status: 'idle',
         startedAt: now,
         lastStatusChangeAt: now,
       };
       this.sessions.set(sessionID, session);
     } else {
-      if (title && title !== `Session ${sessionID.slice(0, 8)}`) {
+      if (title && !title.startsWith('ses_') && title !== session.title) {
         session.title = title;
+      } else if (
+        session.title.startsWith('Session ses_') ||
+        session.title.startsWith('ses_') ||
+        session.title.startsWith('Job (ses_')
+      ) {
+        if (effectiveTitle && !effectiveTitle.startsWith('Job (ses_')) {
+          session.title = effectiveTitle;
+        }
       }
       if (directory) {
         session.directory = directory;
       }
     }
     return session;
+  }
+
+  public updateSessionTitle(sessionID: string, title?: string) {
+    if (!title?.trim()) return;
+    const session = this.sessions.get(sessionID);
+    if (session && !title.startsWith('ses_')) {
+      session.title = title.trim();
+    }
   }
 
   public onSessionBusy(
@@ -229,12 +264,25 @@ export class JobTracker {
     const tagEmoji = isError ? 'x,warning' : 'white_check_mark,opencode';
     const priority = isError ? 4 : 3;
 
+    let sessionTitle = session.title;
+    if (
+      !sessionTitle ||
+      sessionTitle.startsWith('Session ses_') ||
+      sessionTitle.startsWith('ses_') ||
+      sessionTitle.startsWith('Job (ses_')
+    ) {
+      const dbTitle = resolveSessionTitleFromDb(session.sessionID);
+      if (dbTitle) {
+        sessionTitle = dbTitle;
+      }
+    }
+
     const notifTitle = isError
-      ? `OpenCode Job Failed: ${session.title}`
-      : `OpenCode Job Finished: ${session.title}`;
+      ? `OpenCode Job Failed: ${sessionTitle}`
+      : `OpenCode Job Finished: ${sessionTitle}`;
 
     const lines: string[] = [
-      `Job: ${session.title}`,
+      `Job: ${sessionTitle}`,
       `Status: ${statusText}`,
       `Duration: ${formatDuration(durationMs)}`,
     ];
@@ -256,8 +304,20 @@ export class JobTracker {
     } else {
       lines.push(`Outstanding Jobs Remaining: ${remainingCount}`);
       for (const job of outstanding) {
+        let displayTitle = job.title;
+        if (
+          !displayTitle ||
+          displayTitle.startsWith('Session ses_') ||
+          displayTitle.startsWith('ses_') ||
+          displayTitle.startsWith('Job (ses_')
+        ) {
+          const dbTitle = resolveSessionTitleFromDb(job.sessionID);
+          if (dbTitle) {
+            displayTitle = dbTitle;
+          }
+        }
         lines.push(
-          `• ${job.title} (${formatDuration(job.durationMs)} elapsed)`,
+          `• ${displayTitle} (${formatDuration(job.durationMs)} elapsed)`,
         );
       }
     }
