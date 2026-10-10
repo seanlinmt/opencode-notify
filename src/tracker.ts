@@ -35,8 +35,9 @@ function tryAcquireDebounceLock(sessionID: string, windowMs = 5000): boolean {
     writeFileSync(lockFile, String(now), { flag: 'wx' });
     JobTracker.globalLastNotified.set(sessionID, now);
     return true;
-  } catch (err: any) {
-    if (err && (err.code === 'EEXIST' || err.message?.includes('file already exists'))) {
+  } catch (err: unknown) {
+    const error = err as { code?: string; message?: string } | null;
+    if (error && (error.code === 'EEXIST' || error.message?.includes('file already exists'))) {
       return false;
     }
     // If filesystem locking is inaccessible (e.g. sandbox permissions), fall back to in-memory lock

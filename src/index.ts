@@ -206,8 +206,9 @@ export const OpenCodeNotifyPlugin = {
           for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
             await handleEvent(event);
           }
-        } catch (e: any) {
-          logDebug(`Error in event subscription: ${e?.message}`);
+        } catch (e: unknown) {
+          const errMessage = e instanceof Error ? e.message : String(e);
+          logDebug(`Error in event subscription: ${errMessage}`);
         }
       })();
       return () => controller.abort();

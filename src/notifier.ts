@@ -43,7 +43,7 @@ export async function sendNtfyNotification(
     }
 
     return { success: true };
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Fallback to node:https for strict environments
     try {
       const url = new URL(endpoint);
@@ -78,8 +78,10 @@ export async function sendNtfyNotification(
         req.write(postData);
         req.end();
       });
-    } catch (fallbackErr: any) {
-      return { success: false, error: fallbackErr.message || String(err) };
+    } catch (fallbackErr: unknown) {
+      const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      const originalMsg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: fallbackMsg || originalMsg };
     }
   }
 }
