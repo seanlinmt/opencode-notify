@@ -132,3 +132,10 @@ docker logs -n 20 ntfy-telegram-bridge
 ```bash
 opencode service restart
 ```
+
+---
+
+## License
+
+[MIT](LICENSE)
+
